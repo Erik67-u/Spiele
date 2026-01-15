@@ -1,139 +1,96 @@
-import pygame
+import streamlit as st
 import random
-import sys
+import time
 
-pygame.init()
-
-# -----------------------------
-# Grundeinstellungen
-# -----------------------------
-WIDTH, HEIGHT = 800, 400
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("MURDER")
-
-clock = pygame.time.Clock()
-font = pygame.font.SysFont("arial", 28)
-
-# Farben
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-RED = (200, 50, 50)
-GREEN = (50, 200, 50)
-BLUE = (50, 50, 200)
-
-# Spielzustände
-SERVANT = "servant"
-KING = "king"
-DEAD = "dead"
-
-state = SERVANT
+st.set_page_config(page_title="MURDER", layout="centered")
 
 # -----------------------------
-# Spieler & König
+# Initialisierung
 # -----------------------------
-player = pygame.Rect(100, 250, 40, 60)
-player_speed = 4
+if "state" not in st.session_state:
+    st.session_state.state = "servant"
+    st.session_state.distance = 100
+    st.session_state.difficulty = 1
+    st.session_state.assassin_side = None
+    st.session_state.attack_time = None
 
-king = pygame.Rect(500, 250, 50, 70)
-
-# -----------------------------
-# Gegner
-# -----------------------------
-assassin = None
-assassin_dir = None
-assassin_delay = 120
-difficulty = 1
+st.title("🗡️ MURDER")
 
 # -----------------------------
-# Hilfsfunktionen
+# DIENER-PHASE
 # -----------------------------
-def draw_text(text, y):
-    t = font.render(text, True, WHITE)
-    screen.blit(t, (WIDTH // 2 - t.get_width() // 2, y))
+if st.session_state.state == "servant":
+    st.subheader("Du bist ein Diener.")
+    st.write("Schleiche dich an den König heran.")
+    
+    st.session_state.distance -= random.randint(5, 15)
+    st.progress(max(0, 100 - st.session_state.distance))
 
-def spawn_assassin():
-    global assassin, assassin_dir
-    assassin_dir = random.choice(["left", "right"])
-    x = -60 if assassin_dir == "left" else WIDTH + 60
-    assassin = pygame.Rect(x, 250, 40, 60)
+    if st.button("🗡️ Mordversuch"):
+        if st.session_state.distance <= 20:
+            st.session_state.state = "king"
+            st.session_state.difficulty = 1
+            st.success("Der Mord gelingt. Du bist jetzt König.")
+            st.rerun()
+        else:
+            st.session_state.state = "dead"
+            st.rerun()
+
+    st.caption("Je näher du bist, desto besser dein Timing.")
 
 # -----------------------------
-# Hauptloop
+# KÖNIGS-PHASE
 # -----------------------------
-running = True
-while running:
-    clock.tick(60)
-    screen.fill(BLACK)
+elif st.session_state.state == "king":
+    st.subheader("👑 Du bist König.")
+    st.write(f"Schwierigkeit: {st.session_state.difficulty}")
 
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
+    # Neuen Attentäter erzeugen
+    if st.session_state.assassin_side is None:
+        st.session_state.assassin_side = random.choice(["links", "rechts"])
+        st.session_state.attack_time = time.time()
 
-        # Mordversuch als Diener
-        if state == SERVANT and event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE:
-                if abs(player.centerx - king.centerx) < 60:
-                    state = KING
-                    player.x = king.x
-                    assassin = None
-                    assassin_delay = 120
-                    difficulty = 1
-                else:
-                    state = DEAD
+    reaction_window = max(0.6, 2.0 - st.session_state.difficulty * 0.15)
 
-        # Abwehr als König
-        if state == KING and event.type == pygame.KEYDOWN and assassin:
-            if event.key == pygame.K_a and assassin_dir == "left":
-                assassin = None
-                difficulty += 1
-                assassin_delay = max(25, 90 - difficulty * 5)
+    st.warning(f"⚠️ Ein Attentäter nähert sich von **{st.session_state.assassin_side.upper()}**!")
+    st.caption(f"Reaktionszeit: {reaction_window:.2f} Sekunden")
 
-            if event.key == pygame.K_d and assassin_dir == "right":
-                assassin = None
-                difficulty += 1
-                assassin_delay = max(25, 90 - difficulty * 5)
+    col1, col2 = st.columns(2)
 
-    keys = pygame.key.get_pressed()
+    def defend(side):
+        now = time.time()
+        if (
+            side == st.session_state.assassin_side
+            and now - st.session_state.attack_time <= reaction_window
+        ):
+            st.session_state.difficulty += 1
+            st.session_state.assassin_side = None
+            st.success("Angriff abgewehrt!")
+            st.rerun()
+        else:
+            st.session_state.state = "dead"
+            st.rerun()
 
-    # -----------------------------
-    # Spielzustände
-    # -----------------------------
-    if state == SERVANT:
-        if keys[pygame.K_LEFT]:
-            player.x -= player_speed
-        if keys[pygame.K_RIGHT]:
-            player.x += player_speed
+    with col1:
+        if st.button("⬅️ Links abwehren"):
+            defend("links")
 
-        pygame.draw.rect(screen, BLUE, player)
-        pygame.draw.rect(screen, RED, king)
-        draw_text("Schleiche zum König und drücke LEERTASTE", 40)
+    with col2:
+        if st.button("➡️ Rechts abwehren"):
+            defend("rechts")
 
-    elif state == KING:
-        pygame.draw.rect(screen, GREEN, player)
-        draw_text(f"Du bist König! Schwierigkeit: {difficulty}", 30)
-        draw_text("A = links abwehren | D = rechts abwehren", 60)
+    # Zu langsam = Tod
+    if time.time() - st.session_state.attack_time > reaction_window:
+        st.session_state.state = "dead"
+        st.rerun()
 
-        assassin_delay -= 1
-        if assassin_delay <= 0 and assassin is None:
-            spawn_assassin()
-
-        if assassin:
-            speed = (5 + difficulty * 1.2)
-            speed = speed if assassin_dir == "left" else -speed
-            assassin.x += speed
-            pygame.draw.rect(screen, RED, assassin)
-
-            if assassin.colliderect(player):
-                state = DEAD
-
-    elif state == DEAD:
-        draw_text("DU BIST TOT", 150)
-        draw_text("ESC zum Beenden", 190)
-
-    pygame.display.flip()
-
-    if keys[pygame.K_ESCAPE]:
-        running = False
-
-pygame.quit()
-sys.exit()
+# -----------------------------
+# TOD
+# -----------------------------
+elif st.session_state.state == "dead":
+    st.error("☠️ DU BIST TOT")
+    st.write("Macht ist vergänglich.")
+    if st.button("🔄 Neustart"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
